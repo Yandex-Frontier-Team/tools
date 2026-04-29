@@ -29,6 +29,7 @@ from .utils import (
     read_jsonl,
 )
 from . import types
+from . import stats
 from . import batch_utils
 from . import crypto_utils
 
@@ -65,6 +66,7 @@ __all__ = [
     "read_jsonl",
 
     "types",
+    "stats",
     "batch_utils",
     "crypto_utils",
 ]
