@@ -7,9 +7,10 @@ name = "tools"
 version = "1.0.0"
 description = "Handy tool set for everyday Python programming"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.10"
 dependencies = [
     "aiohttp",
+    "numpy",
 ]
 
 [project.optional-dependencies]

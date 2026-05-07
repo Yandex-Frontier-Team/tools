@@ -27,6 +27,8 @@ from .utils import (
     datetime_pretty_to_datetime,
     parse_json_dict_from_string,
     read_jsonl,
+    concat_jsonl_sequence,
+    concat_jsonl_graph,
 )
 from . import types
 from . import stats
@@ -64,6 +66,8 @@ __all__ = [
     "datetime_pretty_to_datetime",
     "parse_json_dict_from_string",
     "read_jsonl",
+    "concat_jsonl_sequence",
+    "concat_jsonl_graph",
 
     "types",
     "stats",

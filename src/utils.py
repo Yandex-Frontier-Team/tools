@@ -8,7 +8,9 @@ import hashlib
 import pathlib
 import datetime
 import traceback
+import contextlib
 import typing as tp
+from collections import deque
 from collections.abc import Iterator
 
 
@@ -551,3 +553,224 @@ def read_jsonl(path: str | pathlib.Path, load: bool = False) -> Iterator[str | d
                     continue
 
                 yield raw
+
+
+def read_jsonl_indexed(path: str | pathlib.Path) -> tp.Iterator[tuple[int, int, dict | list]]:
+    file_path = pathlib.Path(path)
+
+    with file_path.open("rb") as file:
+        local_index = 0
+
+        while True:
+            offset = file.tell()
+            raw = file.readline()
+
+            if not raw:
+                break
+
+            stripped = raw.strip()
+
+            if not stripped:
+                continue
+
+            value = json.loads(stripped)
+
+            if not isinstance(value, (dict, list)):
+                raise TypeError(f"JSONL line is {type(value).__name__}, expected dict or list.")
+
+            yield local_index, offset, value
+            local_index += 1
+
+
+def read_jsonl_at(file: tp.BinaryIO, offset: int) -> dict | list:
+    file.seek(offset)
+    raw = file.readline().strip()
+
+    if not raw:
+        raise ValueError("JSONL offset points to an empty line.")
+
+    value = json.loads(raw)
+
+    if not isinstance(value, (dict, list)):
+        raise TypeError(f"JSONL line is {type(value).__name__}, expected dict or list.")
+
+    return value
+
+
+def concat_jsonl_sequence(
+    filepaths: list[str | pathlib.Path],
+    names: list[str],
+    skip_on_error: bool = False,
+    verbose: bool = True,
+) -> tp.Iterator[dict]:
+    filepaths = [pathlib.Path(path) for path in filepaths]
+
+    if len(filepaths) == 0:
+        raise ValueError("`filepaths` must not be empty.")
+
+    if len(filepaths) != len(names):
+        raise ValueError("`filepaths` and `names` must have the same length.")
+
+    root_offsets: dict[int, int] = {}
+    previous_local_to_root: dict[int, int] = {}
+
+    for local_index, offset, _ in read_jsonl_indexed(filepaths[0]):
+        root_offsets[local_index] = offset
+        previous_local_to_root[local_index] = local_index
+
+    root_length = len(root_offsets)
+    root_to_offsets_by_file: list[dict[int, int]] = [root_offsets]
+
+    for level, filepath in enumerate(filepaths[1:], start=1):
+        current_local_to_root: dict[int, int] = {}
+        current_root_offsets: dict[int, int] = {}
+
+        for local_index, offset, value in read_jsonl_indexed(filepath):
+            if not isinstance(value, dict):
+                raise TypeError(f"JSONL line {local_index} in file {level} is {type(value).__name__}, expected dict with `index`.")
+            if "index" not in value:
+                raise KeyError(f"JSONL line {local_index} in file {level} has no `index` field.")
+            if not isinstance(value["index"], int) or isinstance(value["index"], bool):
+                raise TypeError(f"JSONL line {local_index} in file {level} has invalid `index`, expected int.")
+
+            parent_local_index = value["index"]
+
+            if parent_local_index not in previous_local_to_root:
+                if skip_on_error:
+                    if verbose:
+                        print(f"Warning: file {level}, line {local_index} has `index` out of bounds for the previous level. Skipped.")
+                    continue
+                raise ValueError(f"File {level}, line {local_index} has `index` out of bounds for the previous level.")
+
+            root_index = previous_local_to_root[parent_local_index]
+
+            if root_index in current_root_offsets:
+                raise ValueError(f"File {level} has multiple rows attached to root index {root_index}; dict output cannot represent that unambiguously.")
+
+            current_local_to_root[local_index] = root_index
+            current_root_offsets[root_index] = offset
+
+        previous_local_to_root = current_local_to_root
+        root_to_offsets_by_file.append(current_root_offsets)
+
+    with contextlib.ExitStack() as stack:
+        files = [stack.enter_context(path.open("rb")) for path in filepaths]
+
+        for root_index in range(root_length):
+            item = {name: None for name in names}
+
+            for file_index, name in enumerate(names):
+                offset = root_to_offsets_by_file[file_index].get(root_index)
+
+                if offset is not None:
+                    item[name] = read_jsonl_at(files[file_index], offset)
+
+            yield item
+
+
+def concat_jsonl_graph(
+    filepaths: list[str | pathlib.Path],
+    names: list[str],
+    edges: list[tuple[int, int]],
+) -> tp.Iterator[dict]:
+    filepaths = [pathlib.Path(path) for path in filepaths]
+    vertex_count = len(filepaths)
+
+    if vertex_count == 0:
+        raise ValueError("`filepaths` must not be empty.")
+    if vertex_count != len(names):
+        raise ValueError("`filepaths` and `names` must have the same length.")
+    if len(edges) != vertex_count - 1:
+        raise ValueError("Graph is not a tree: a tree with n vertices must have exactly n - 1 edges.")
+
+    children: list[list[int]] = [[] for _ in range(vertex_count)]
+    parent_of = [-1] * vertex_count
+    seen_edges: set[tuple[int, int]] = set()
+
+    for parent, child in edges:
+        if not isinstance(parent, int) or not isinstance(child, int) or isinstance(parent, bool) or isinstance(child, bool):
+            raise TypeError("Every edge must be a tuple of integer vertices.")
+        if parent < 0 or parent >= vertex_count or child < 0 or child >= vertex_count:
+            raise ValueError("Every edge vertex must be inside the range [0, len(filepaths)).")
+        if parent == child:
+            raise ValueError("Graph is not a tree: self-loops are not allowed.")
+        if (parent, child) in seen_edges:
+            raise ValueError("Graph is not a tree: duplicate edges are not allowed.")
+        if child == 0:
+            raise ValueError("Graph is not rooted at vertex 0: vertex 0 cannot have a parent.")
+        if parent_of[child] != -1:
+            raise ValueError(f"Graph is not a tree: vertex {child} has more than one parent.")
+
+        seen_edges.add((parent, child))
+        parent_of[child] = parent
+        children[parent].append(child)
+
+    for vertex in range(1, vertex_count):
+        if parent_of[vertex] == -1:
+            raise ValueError(f"Graph is not connected to root vertex 0: vertex {vertex} has no parent.")
+
+    order: list[int] = []
+    queue = deque([0])
+
+    while queue:
+        vertex = queue.popleft()
+        order.append(vertex)
+        queue.extend(children[vertex])
+
+    if len(order) != vertex_count:
+        raise ValueError("Graph is not connected to root vertex 0.")
+
+    root_offsets: dict[int, int] = {}
+    local_to_root_by_file: list[dict[int, int]] = [{} for _ in range(vertex_count)]
+    root_to_offsets_by_file: list[dict[int, int]] = [{} for _ in range(vertex_count)]
+
+    for local_index, offset, _ in read_jsonl_indexed(filepaths[0]):
+        root_offsets[local_index] = offset
+        local_to_root_by_file[0][local_index] = local_index
+
+    root_length = len(root_offsets)
+    root_to_offsets_by_file[0] = root_offsets
+
+    for vertex in order[1:]:
+        parent = parent_of[vertex]
+        parent_local_to_root = local_to_root_by_file[parent]
+        current_local_to_root: dict[int, int] = {}
+        current_root_offsets: dict[int, int] = {}
+
+        for local_index, offset, value in read_jsonl_indexed(filepaths[vertex]):
+            if not isinstance(value, dict):
+                raise TypeError(f"JSONL line {local_index} in file {vertex} is {type(value).__name__}, expected dict with `index`.")
+            if "index" not in value:
+                raise KeyError(f"JSONL line {local_index} in file {vertex} has no `index` field.")
+            if not isinstance(value["index"], int) or isinstance(value["index"], bool):
+                raise TypeError(f"JSONL line {local_index} in file {vertex} has invalid `index`, expected int.")
+
+            parent_local_index = value["index"]
+
+            if parent_local_index not in parent_local_to_root:
+                raise ValueError(f"File {vertex}, line {local_index} has `index` out of bounds for parent file {parent}.")
+
+            root_index = parent_local_to_root[parent_local_index]
+
+            if root_index in current_root_offsets:
+                raise ValueError(f"File {vertex} has multiple rows attached to root index {root_index}; dict output cannot represent that unambiguously.")
+
+            current_local_to_root[local_index] = root_index
+            current_root_offsets[root_index] = offset
+
+        local_to_root_by_file[vertex] = current_local_to_root
+        root_to_offsets_by_file[vertex] = current_root_offsets
+
+    with contextlib.ExitStack() as stack:
+        files = [stack.enter_context(path.open("rb")) for path in filepaths]
+
+        for root_index in range(root_length):
+            item = {name: None for name in names}
+
+            for file_index, name in enumerate(names):
+                offset = root_to_offsets_by_file[file_index].get(root_index)
+
+                if offset is not None:
+                    item[name] = read_jsonl_at(files[file_index], offset)
+
+            yield item
