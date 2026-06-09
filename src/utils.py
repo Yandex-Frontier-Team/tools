@@ -170,46 +170,6 @@ def positive_filter(items: list[tp.Any]) -> list[tp.Any]:
     return [item for item in items if item]
 
 
-def extract_json_object(string: str) -> str:
-    start = string.find('{')
-
-    if start == -1:
-        raise ValueError("No '{' found in input text.")
-
-    depth, in_string, escape = 0, False, False
-
-    for i in range(start, len(string)):
-        ch = string[i]
-
-        if in_string:
-            if escape:
-                escape = False
-            elif ch == "\\":
-                escape = True
-            elif ch == '"':
-                in_string = False
-
-            continue
-
-        # not in string
-        if ch == '"':
-            in_string = True
-
-        elif ch == '{':
-            depth += 1
-
-        elif ch == '}':
-            depth -= 1
-
-            if depth == 0:
-                return string[start : (i + 1)].strip()
-
-            if depth < 0:
-                break
-
-    raise ValueError("Unbalanced braces: could not find matching '}' for the first '{'.")
-
-
 def find_json_start(chunk: bytes) -> int | None:
     starts = {ord('{'), ord('[')}
 
@@ -466,7 +426,7 @@ class InvalidJSONError(Exception):
         super().__init__(f"Invalid JSON:\n{self.body_text_truncated}")
 
 
-def parse_json_dict_from_string(text: str) -> JSONType:
+def parse_json_from_string(text: str) -> JSONType:
     if not isinstance(text, str):
         raise TypeError(f"`text` must be str, got {type(text).__name__}.")
 

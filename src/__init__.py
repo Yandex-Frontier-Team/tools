@@ -8,7 +8,6 @@ from .utils import (
     rename_fields_in_dict,
     truncate_word_aware,
     positive_filter,
-    extract_json_object,
     find_json_start,
     exception_to_string,
     repeat,
@@ -25,7 +24,7 @@ from .utils import (
     bytesize_to_string,
     datetime_now_pretty,
     datetime_pretty_to_datetime,
-    parse_json_dict_from_string,
+    parse_json_from_string,
     read_jsonl,
     concat_jsonl_sequence,
     concat_jsonl_graph,
@@ -34,6 +33,7 @@ from . import types
 from . import stats
 from . import batch_utils
 from . import crypto_utils
+from . import archive_utils
 
 
 __all__ = [
@@ -47,7 +47,6 @@ __all__ = [
     "rename_fields_in_dict",
     "truncate_word_aware",
     "positive_filter",
-    "extract_json_object",
     "find_json_start",
     "exception_to_string",
     "repeat",
@@ -64,7 +63,7 @@ __all__ = [
     "bytesize_to_string",
     "datetime_now_pretty",
     "datetime_pretty_to_datetime",
-    "parse_json_dict_from_string",
+    "parse_json_from_string",
     "read_jsonl",
     "concat_jsonl_sequence",
     "concat_jsonl_graph",
@@ -73,4 +72,5 @@ __all__ = [
     "stats",
     "batch_utils",
     "crypto_utils",
+    "archive_utils",
 ]
