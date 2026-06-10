@@ -488,7 +488,7 @@ def read_jsonl(path: str | pathlib.Path, load: tp.Literal[False] = False) -> Ite
 @tp.overload
 def read_jsonl(path: str | pathlib.Path, load: tp.Literal[True]) -> Iterator[dict | list]: ...
 
-def read_jsonl(path: str | pathlib.Path, load: bool = False) -> Iterator[str | dict | list]:
+def read_jsonl(path: str | pathlib.Path, load: bool = True) -> Iterator[str | dict | list]:
     file_path = pathlib.Path(path)
 
     with file_path.open("rt", encoding="utf-8") as file:
